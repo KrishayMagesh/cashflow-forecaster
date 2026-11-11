@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Forecast your cash for the next 13 weeks</h1>
+  <p class="muted">Upload a transaction export (CSV) from your bank or accounting software. It
+     needs a date, a description, and either an amount or debit/credit columns. Six months or
+     more of history gives the best results.</p>
+  <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Transactions (CSV) <input type="file" name="file" accept=".csv" required></label>
+      <label>Current cash balance <input name="balance" inputmode="decimal"
+             placeholder="e.g. 15000"></label>
+      <label>Alert me below <input name="threshold" inputmode="decimal" placeholder="e.g. 5000"></label>
+      <div><button>Create forecast</button></div>
+    </div>
+  </form>
+  <p class="note">Leave the balance blank if your file has a Balance column. Your data is stored
+     only in your account and is never shared.</p>
+</section>
+
+<section class="card">
+  <h2>No file handy?</h2>
+  <p class="muted">Try it with 18 months of made-up transactions for a fictional bakery.</p>
+  <form method="post" action="{{ url_for('sample') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button>Use sample data</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Your forecasts</h2>
+  {% if forecasts %}
+  <div class="scroll"><table>
+    <thead><tr><th>Name</th><th>Data</th><th>Balance</th><th>Created (UTC)</th><th></th></tr></thead>
+    <tbody>
+    {% for f in forecasts %}
+      <tr>
+        <td>{{ f.name }}</td>
+        <td>{{ f.n_transactions|fmt }} transactions, {{ f.first_date }} to {{ f.as_of }}</td>
+        <td>{{ f.start_balance|money }}</td>
+        <td>{{ f.created_at[:16].replace('T', ' ') }}</td>
+        <td><a href="{{ url_for('forecast', fid=f.id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="muted">No forecasts yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

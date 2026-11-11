@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ f.name }}{% endblock %}
+{% block content %}
+{% set shown = what_if or base %}
+<p><a href="{{ url_for('dashboard') }}">&larr; Dashboard</a></p>
+
+<section class="card">
+  <h1>{{ f.name }}</h1>
+  <p class="muted">{{ f.n_transactions|fmt }} transactions from {{ f.first_date }} to {{ f.as_of }}.
+     Forecast covers {{ base.weeks[0].week_start }} to {{ base.weeks[-1].week_start }} (13 weeks).</p>
+
+  {% if shown.first_below_threshold %}
+  <p class="flash error">Cash is projected to fall below your alert level of
+     {{ f.threshold|money }} in the week of {{ shown.first_below_threshold }}{% if what_if %}
+     in this scenario{% endif %}.</p>
+  {% elif shown.lowest_balance < 0 %}
+  <p class="flash error">Cash is projected to go negative.</p>
+  {% elif f.threshold %}
+  <p class="flash ok">Cash is projected to stay above your alert level of {{ f.threshold|money }}{% if what_if %} in this scenario{% endif %}.</p>
+  {% endif %}
+
+  <div class="metrics">
+    <div><span>Cash today</span><strong>{{ f.start_balance|money }}</strong></div>
+    <div><span>Lowest point (week of {{ shown.lowest_week_start }})</span>
+      <strong>{{ shown.lowest_balance|money }}</strong></div>
+    <div><span>In 13 weeks</span><strong>{{ shown.ending_balance|money }}</strong></div>
+    <div><span>Net change</span><strong>{{ shown.total_net|money }}</strong></div>
+  </div>
+  {% if what_if %}<p class="note">Showing the what-if scenario. Without it: lowest
+    {{ base.lowest_balance|money }}, in 13 weeks {{ base.ending_balance|money }}.</p>{% endif %}
+</section>
+
+<section class="card">
+  <img class="chart" src="{{ url_for('balance_png', fid=f.id) }}{% if query %}?{{ query }}{% endif %}"
+       alt="Cash balance chart">
+  <p class="note">The shaded band is a rough range based on how much your week-to-week cash
+     has varied. Real results can fall outside it.</p>
+</section>
+
+<section class="card">
+  <h2>What if...?</h2>
+  <form method="get" action="{{ url_for('forecast', fid=f.id) }}">
+    <div class="form-row">
+      <label>Revenue changes by (%)
+        <input name="revenue_change_pct" inputmode="decimal" placeholder="e.g. -20"
+               value="{{ scenario.revenue_change_pct if scenario.revenue_change_pct is not none else '' }}"></label>
+      <label>One-time expense ($)
+        <input name="one_time_expense" inputmode="decimal" placeholder="e.g. 8000"
+               value="{{ scenario.one_time_expense or '' }}"></label>
+      <label>...in week
+        <select name="one_time_week">{% for w in range(1, horizon + 1) %}
+          <option value="{{ w }}" {% if scenario.one_time_week == w %}selected{% endif %}>{{ w }}</option>{% endfor %}
+        </select></label>
+      <label>New monthly cost ($)
+        <input name="new_monthly_cost" inputmode="decimal" placeholder="e.g. 4000 for a hire"
+               value="{{ scenario.new_monthly_cost or '' }}"></label>
+      <label>...starting week
+        <select name="new_monthly_start_week">{% for w in range(1, horizon + 1) %}
+          <option value="{{ w }}" {% if scenario.new_monthly_start_week == w %}selected{% endif %}>{{ w }}</option>{% endfor %}
+        </select></label>
+      <div><button>Run scenario</button></div>
+    </div>
+  </form>
+  {% if what_if %}<p class="note"><a href="{{ url_for('forecast', fid=f.id) }}">Clear scenario</a></p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Week by week{% if what_if %} (scenario){% endif %}</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Week of</th><th>Money in</th><th>Money out</th><th>Net</th>
+      <th>Ending balance</th><th>Rough range</th></tr></thead>
+    <tbody>
+    {% for w in shown.weeks %}
+      <tr{% if f.threshold and w.ending_balance < f.threshold %} class="warn"{% endif %}>
+        <td>{{ w.week_start }}</td><td>{{ w.inflows|money }}</td><td>{{ w.outflows|money }}</td>
+        <td>{{ w.net|money }}</td><td><strong>{{ w.ending_balance|money }}</strong></td>
+        <td>{{ w.low|money }} to {{ w.high|money }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div style="margin-top:1rem">
+    <a class="button" href="{{ url_for('download', fid=f.id) }}{% if query %}?{{ query }}{% endif %}">Download forecast (CSV)</a>
+    <form method="post" action="{{ url_for('delete', fid=f.id) }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="danger">Delete</button>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <h2>What the forecast assumes</h2>
+  <p class="muted">Recurring payments found in your history, placed on their expected dates.
+     Everything else uses your typical week: about {{ base.baseline_weekly_inflow|money }} in and
+     {{ base.baseline_weekly_outflow|money }} out{% if base.seasonal_used %}, with money in and
+     supply costs adjusted for last year's seasonal pattern{% endif %}.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Payee</th><th>Category</th><th>How often</th><th>Typical amount</th>
+      <th>Last seen</th></tr></thead>
+    <tbody>
+    {% for r in base.recurring %}
+      <tr><td>{{ r.payee }}</td><td>{{ r.category }}</td><td>{{ r.cadence }}</td>
+        <td>{{ r.amount|money }}</td><td>{{ r.last_date }}</td></tr>
+    {% endfor %}
+    {% for r in base.yearly_items %}
+      <tr><td>{{ r.payee }}</td><td>Taxes</td><td>Same date as last year</td>
+        <td>{{ r.amount|money }}</td><td>{{ r.last_year }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if not base.recurring and not base.yearly_items %}
+  <p class="muted">No recurring payments were found yet. More history usually helps.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>How accurate is it?</h2>
+  {% if backtest %}
+  <p>We forecast your last 13 weeks ({{ backtest.period_start }} to {{ backtest.period_end }})
+     using only the data before them, then compared with what actually happened.</p>
+  <div class="metrics">
+    <div><span>Average weekly error</span><strong>{{ backtest.weekly_mae|money }}</strong></div>
+    <div><span>Simple "average week" guess</span><strong>{{ backtest.naive_weekly_mae|money }}</strong></div>
+    <div><span>Improvement</span><strong>{{ backtest.improvement_pct }}%</strong></div>
+    <div><span>13-week total was off by</span><strong>{{ backtest.total_error|money }}</strong></div>
+  </div>
+  <p class="note">A positive total error means the forecast was too optimistic.</p>
+  {% else %}
+  <p class="muted">Upload at least 39 weeks of history to see an accuracy check.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <img class="chart" src="{{ url_for('spending_png', fid=f.id) }}" alt="Spending by category">
+</section>
+
+<p class="note">These are estimates for planning, based only on your past transactions. They are
+   not financial, tax or accounting advice.</p>
+{% endblock %}
